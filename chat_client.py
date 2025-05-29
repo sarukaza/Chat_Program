@@ -28,6 +28,12 @@ class ChatClient:
         self.server_entry.insert(0, "localhost")
         self.server_entry.pack(padx=10, pady=5, fill=tk.X)
 
+        # ユーザー名入力欄の追加
+        tk.Label(self.sidebar, text="ユーザー名:", fg="white", bg="#202225").pack(pady=(10, 0))
+        self.username_entry = tk.Entry(self.sidebar, bg="#36393f", fg="white", insertbackground="white")
+        self.username_entry.insert(0, "user1")
+        self.username_entry.pack(padx=10, pady=5, fill=tk.X)
+
         self.connect_button = tk.Button(self.sidebar, text="接続", command=self.connect_to_server, bg="#7289da", fg="white")
         self.connect_button.pack(padx=10, pady=10, fill=tk.X)
 
@@ -62,12 +68,21 @@ class ChatClient:
         self.client = None
         self.receive_thread = None
 
+        self.username_entry.bind("<FocusOut>", self.rename_user)
+        self.last_sent_username = self.username_entry.get().strip()
+
     def connect_to_server(self):
         server_ip = self.server_entry.get()
+        username = self.username_entry.get().strip()
+        if not username:
+            messagebox.showerror("ユーザー名エラー", "ユーザー名を入力してください。")
+            return
         try:
             self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client.connect((server_ip, PORT))
-            self.add_chat_message(f"[接続] {server_ip}:{PORT} に接続しました", sender="system")
+            # 接続直後にユーザー名をサーバーへ送信
+            self.client.sendall(f"__USERNAME__:{username}".encode("utf-8"))
+            self.add_chat_message(f"[接続] {server_ip}:{PORT} に接続しました (ユーザー名: {username})", sender="system")
             self.receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
             self.receive_thread.start()
         except Exception as e:
@@ -81,6 +96,10 @@ class ChatClient:
                     self.add_chat_message("[切断] サーバとの接続が切れました", sender="system")
                     break
                 msg = data.decode("utf-8")
+                # 自分の送信メッセージはサーバーから受信しても表示しない
+                username = self.username_entry.get().strip()
+                if msg.startswith(f"{username}: "):
+                    continue
                 self.add_chat_message(msg, sender="other")
             except Exception as e:
                 self.add_chat_message(f"[受信エラー] {e}", sender="system")
@@ -88,10 +107,11 @@ class ChatClient:
 
     def send_message(self, event=None):
         msg = self.entry.get().strip()
+        username = self.username_entry.get().strip()
         if msg and self.client:
             try:
                 self.client.sendall(msg.encode("utf-8"))
-                self.add_chat_message("あなた: " + msg, sender="self")
+                self.add_chat_message(f"{username}: {msg}", sender="self")
                 self.entry.delete(0, tk.END)
                 if msg == "q":
                     self.client.close()
@@ -99,9 +119,30 @@ class ChatClient:
             except Exception as e:
                 messagebox.showerror("送信エラー", f"送信できませんでした: {e}")
 
+    def rename_user(self, event=None):
+        if self.client:
+            new_username = self.username_entry.get().strip()
+            if new_username and new_username != self.last_sent_username:
+                try:
+                    self.client.sendall(f"__RENAME__:{new_username}".encode("utf-8"))
+                    self.add_chat_message(f"[ユーザー名変更] {self.last_sent_username} → {new_username}", sender="system")
+                    self.last_sent_username = new_username
+                except Exception as e:
+                    messagebox.showerror("名前変更エラー", f"ユーザー名変更に失敗しました: {e}")
+
     def add_chat_message(self, message, sender="self"):
         time_str = datetime.now().strftime("%H:%M")
-        full_msg = f"{time_str} {message}"
+
+        # アイコン（絵文字）設定
+        if sender == "self":
+            icon = "😎"
+        elif sender == "other":
+            icon = "😊"
+        else:
+            icon = "💬"
+
+        # フルメッセージ（アイコン付き）
+        full_msg = f"{icon} {time_str} {message}"
 
         label = tk.Label(
             self.message_frame, text=full_msg, wraplength=480,
