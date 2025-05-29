@@ -15,28 +15,53 @@ PORT = 50000       # ポート番号
 BUFSIZE = 4096     # 受信バッファサイズ
 HOST = ''          # ホスト名（空文字列で全アドレスから接続可）
 
-clients = []       # 接続中クライアントのリスト
+clients = []       # 接続中クライアントのリスト（conn, usernameのタプルに変更）
 
 # クライアント処理スレッド関数
 def handle_client(conn, addr):
     print(f"[接続] {addr} が接続しました")
-    clients.append(conn)
+    username = None
     try:
+        # 最初のメッセージでユーザー名を受信
+        data = conn.recv(BUFSIZE)
+        if not data:
+            conn.close()
+            return
+        msg = data.decode('utf-8')
+        if msg.startswith("__USERNAME__:"):
+            username = msg.split(":", 1)[1]
+        else:
+            username = str(addr)
+        clients.append((conn, username))
+        print(f"[ユーザー名登録] {addr} -> {username}")
         while True:
             data = conn.recv(BUFSIZE)
             if not data:
                 break
-            msg = f"{addr}> {data.decode('utf-8')}"
-            print(msg)
-            # 全クライアントに送信（自分も含む）
-            for c in clients:
-                if c != conn:  # 自分には送らない場合はこの条件を使う
-                    c.sendall(msg.encode("utf-8"))
+            text = data.decode('utf-8')
+            # ユーザー名変更コマンドの処理
+            if text.startswith("__RENAME__:"):
+                new_username = text.split(":", 1)[1]
+                print(f"[ユーザー名変更] {username} → {new_username}")
+                # clientsリストの該当connのusernameを更新
+                for i, (c, u) in enumerate(clients):
+                    if c == conn:
+                        clients[i] = (conn, new_username)
+                        break
+                username = new_username
+                continue
+            relay_msg = f"{username}: {text}"
+            print(f"[受信] {relay_msg}")
+            # 全クライアントに送信（自分以外）
+            for c, u in clients:
+                if c != conn:
+                    c.sendall(relay_msg.encode("utf-8"))
     except Exception as e:
         print(f"[エラー] {addr}: {e}")
     finally:
         print(f"[切断] {addr} が切断しました")
-        clients.remove(conn)
+        # clientsリストから削除
+        clients[:] = [(c, u) for c, u in clients if c != conn]
         conn.close()
 
 # メイン関数
