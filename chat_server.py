@@ -34,6 +34,11 @@ def handle_client(conn, addr):
             username = str(addr)
         clients.append((conn, username))
         print(f"[ユーザー名登録] {addr} -> {username}")
+        # 参加通知を全クライアントに送信
+        join_msg = f"{username}さんが参加しました。"
+        for c, u in clients:
+            if c != conn:
+                c.sendall(join_msg.encode("utf-8"))
         while True:
             data = conn.recv(BUFSIZE)
             if not data:
@@ -60,6 +65,14 @@ def handle_client(conn, addr):
         print(f"[エラー] {addr}: {e}")
     finally:
         print(f"[切断] {addr} が切断しました")
+        # 退出通知を全クライアントに送信
+        leave_msg = f"{username}さんが退出しました。"
+        for c, u in clients:
+            if c != conn:
+                try:
+                    c.sendall(leave_msg.encode("utf-8"))
+                except Exception:
+                    pass
         # clientsリストから削除
         clients[:] = [(c, u) for c, u in clients if c != conn]
         conn.close()
