@@ -65,6 +65,10 @@ class ChatClient:
         self.send_button = tk.Button(self.entry_frame, text="送信", command=self.send_message, bg="#7289da", fg="white", borderwidth=0)
         self.send_button.pack(side=tk.RIGHT, padx=10)
 
+        # 退出ボタンの追加
+        self.exit_button = tk.Button(self.sidebar, text="退出", command=self.exit_chat, bg="#ed4245", fg="white")
+        self.exit_button.pack(padx=10, pady=10, fill=tk.X)
+
         self.client = None
         self.receive_thread = None
 
@@ -129,6 +133,16 @@ class ChatClient:
                     self.last_sent_username = new_username
                 except Exception as e:
                     messagebox.showerror("名前変更エラー", f"ユーザー名変更に失敗しました: {e}")
+
+    def exit_chat(self):
+        if self.client:
+            try:
+                self.client.close()
+                self.client = None
+                self.add_chat_message("[接続解除] サーバーから切断しました", sender="system")
+            except Exception:
+                pass
+        # アプリ自体は終了しない
 
     def add_chat_message(self, message, sender="self"):
         time_str = datetime.now().strftime("%H:%M")
