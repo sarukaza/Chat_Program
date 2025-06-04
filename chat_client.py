@@ -15,7 +15,7 @@ BUFSIZE = 4096
 class ChatClient:
     def __init__(self, master):
         self.master = master
-        self.master.title("Discord風 TCPチャットクライアント")
+        self.master.title("sarucord")
         self.master.geometry("700x500")
         self.master.configure(bg="#2f3136")
 
@@ -33,6 +33,15 @@ class ChatClient:
         self.username_entry = tk.Entry(self.sidebar, bg="#36393f", fg="white", insertbackground="white")
         self.username_entry.insert(0, "user1")
         self.username_entry.pack(padx=10, pady=5, fill=tk.X)
+
+        # アイコン選択欄の追加
+        tk.Label(self.sidebar, text="アイコン:", fg="white", bg="#202225").pack(pady=(10, 0))
+        self.icon_var = tk.StringVar(value="😎")
+        self.icon_options = ["😎", "😊", "🐱", "🐶", "🍀", "🌸", "🚗", "🎮", "👾", "🦄"]
+        self.icon_menu = tk.OptionMenu(self.sidebar, self.icon_var, *self.icon_options)
+        self.icon_menu.config(bg="#36393f", fg="white", highlightthickness=0, activebackground="#7289da")
+        self.icon_menu.pack(padx=10, pady=5, fill=tk.X)
+        self.icon_var.trace_add('write', self.select_icon)
 
         self.connect_button = tk.Button(self.sidebar, text="接続", command=self.connect_to_server, bg="#7289da", fg="white")
         self.connect_button.pack(padx=10, pady=10, fill=tk.X)
@@ -74,6 +83,7 @@ class ChatClient:
 
         self.username_entry.bind("<FocusOut>", self.rename_user)
         self.last_sent_username = self.username_entry.get().strip()
+        self.user_icons = {}  # ユーザー名→アイコンの辞書
 
     def connect_to_server(self):
         server_ip = self.server_entry.get()
@@ -86,6 +96,9 @@ class ChatClient:
             self.client.connect((server_ip, PORT))
             # 接続直後にユーザー名をサーバーへ送信
             self.client.sendall(f"__USERNAME__:{username}".encode("utf-8"))
+            # 接続直後に自分のアイコンもサーバーへ送信
+            icon = self.icon_var.get()
+            self.client.sendall(f"__ICON__:{icon}".encode("utf-8"))
             self.add_chat_message(f"[接続] {server_ip}:{PORT} に接続しました (ユーザー名: {username})", sender="system")
             self.receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
             self.receive_thread.start()
@@ -100,11 +113,31 @@ class ChatClient:
                     self.add_chat_message("[切断] サーバとの接続が切れました", sender="system")
                     break
                 msg = data.decode("utf-8")
+                # アイコン変更通知の処理
+                if msg.startswith("__ICON__:"):
+                    # __ICON__:<username>:<icon>
+                    try:
+                        _, username, icon = msg.split(":", 2)
+                        self.user_icons[username] = icon
+                        # 自分自身のアイコン変更も反映
+                        if username == self.username_entry.get().strip():
+                            # すでにUIが最新なら何もしない
+                            if self.icon_var.get() != icon:
+                                self.icon_var.set(icon)
+                    except Exception:
+                        pass
+                    continue
                 # 自分の送信メッセージはサーバーから受信しても表示しない
                 username = self.username_entry.get().strip()
-                if msg.startswith(f"{username}: "):
+                if msg.startswith(f"{self.icon_var.get()} {username}: "):
                     continue
-                self.add_chat_message(msg, sender="other")
+                # 他人のメッセージのアイコンを反映
+                for u, icon in self.user_icons.items():
+                    if msg.startswith(f"{icon} {u}: "):
+                        self.add_chat_message(msg, sender="other")
+                        break
+                else:
+                    self.add_chat_message(msg, sender="other")
             except Exception as e:
                 self.add_chat_message(f"[受信エラー] {e}", sender="system")
                 break
@@ -112,10 +145,11 @@ class ChatClient:
     def send_message(self, event=None):
         msg = self.entry.get().strip()
         username = self.username_entry.get().strip()
+        icon = self.icon_var.get()
         if msg and self.client:
             try:
                 self.client.sendall(msg.encode("utf-8"))
-                self.add_chat_message(f"{username}: {msg}", sender="self")
+                self.add_chat_message(f"{icon} {username}: {msg}", sender="self")
                 self.entry.delete(0, tk.END)
                 if msg == "q":
                     self.client.close()
@@ -134,6 +168,15 @@ class ChatClient:
                 except Exception as e:
                     messagebox.showerror("名前変更エラー", f"ユーザー名変更に失敗しました: {e}")
 
+    def select_icon(self, *args):
+        # アイコン選択時にサーバーへ新しいアイコンを送信
+        if self.client:
+            icon = self.icon_var.get()
+            try:
+                self.client.sendall(f"__ICON__:{icon}".encode("utf-8"))
+            except Exception as e:
+                messagebox.showerror("アイコン変更エラー", f"アイコン変更に失敗しました: {e}")
+
     def exit_chat(self):
         if self.client:
             try:
@@ -146,17 +189,19 @@ class ChatClient:
 
     def add_chat_message(self, message, sender="self"):
         time_str = datetime.now().strftime("%H:%M")
-
-        # アイコン（絵文字）設定
+        # 既にアイコンが含まれている場合はそのまま、なければ自分のアイコンを付加
         if sender == "self":
-            icon = "😎"
+            icon = self.icon_var.get()
+            if not message.startswith(icon):
+                message = f"{icon} {message}"
         elif sender == "other":
-            icon = "😊"
-        else:
+            # 他人のメッセージにアイコンがなければデフォルト
+            if not any(message.startswith(i) for i in self.icon_options):
+                message = f"😊 {message}"
+        elif sender == "system":
             icon = "💬"
-
-        # フルメッセージ（アイコン付き）
-        full_msg = f"{icon} {time_str} {message}"
+            message = f"{icon} {message}"
+        full_msg = f"{time_str} {message}"
 
         label = tk.Label(
             self.message_frame, text=full_msg, wraplength=480,
